@@ -1,0 +1,8 @@
+{
+  "name": "library-db",
+  "version": "1.0.0",
+  "description": "Book catalogue with full CRUD: Express + MongoDB + vanilla JS",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "express": "^4.19.2", "mongoose": "^8.5.0" }
+}
