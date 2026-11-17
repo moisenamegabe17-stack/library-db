@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Library catalogue</title>
+<style>
+:root{--bg:#eef1ee;--surface:#fbfcfb;--ink:#1b2a2a;--muted:#5d6e6d;--line:#cfd8d5;--accent:#1f5f5b;--accent-ink:#fff;--danger:#a63d2f;
+--ok:#2f6b3a;--warn:#8a5a00;--lost:#a63d2f;font-family:Georgia,"Iowan Old Style",serif}
+@media (prefers-color-scheme:dark){:root{--bg:#141b1b;--surface:#1c2625;--ink:#e6eeec;--muted:#93a5a2;--line:#2f3d3b;--accent:#6bc3bb;--accent-ink:#0e1a19;--danger:#e0806f;--ok:#7fc88b;--warn:#e0b55c;--lost:#e0806f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.5}
+main{max-width:960px;margin:0 auto;padding:32px 20px 64px}
+h1{font-size:2rem;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0 0 24px}
+button,input,select,textarea{font:inherit;color:inherit}
+.bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.bar input,.bar select{padding:9px 12px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+.bar input{flex:1;min-width:180px}
+.btn{padding:9px 16px;border-radius:6px;border:1px solid var(--line);background:var(--surface);cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.danger{color:var(--danger)}
+.btn.sm{padding:4px 10px;font-size:.875rem}
+.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+table{width:100%;border-collapse:collapse;min-width:640px}
+th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:.9rem}
+tr:last-child td{border-bottom:0}
+td.t{font-weight:600}.sm-text{color:var(--muted);font-size:.875rem;font-weight:400}
+.badge{font-size:.85rem;font-weight:600}
+.available{color:var(--ok)}.borrowed{color:var(--warn)}.lost{color:var(--lost)}
+.actions{white-space:nowrap}.actions .btn+.btn{margin-left:6px}
+.empty{padding:40px 20px;text-align:center;color:var(--muted)}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);padding:24px;width:min(460px,92vw)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog h2{margin:0 0 16px;font-size:1.25rem}
+label{display:block;margin-bottom:12px;font-size:.9rem;color:var(--muted)}
+label input,label select,label textarea{display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.foot{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:6px;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.show{opacity:1}#toast.err{background:var(--danger);color:#fff}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Library catalogue</h1>
+  <p class="sub">Add, find, update and remove the books in your collection.</p>
+  <div class="bar">
+    <input id="q" type="search" placeholder="Search title, author or genre" aria-label="Search books">
+    <select id="statusFilter" autocomplete="off" aria-label="Filter by status">
+      <option value="">All statuses</option><option>available</option><option>borrowed</option><option>lost</option>
+    </select>
+    <button class="btn primary" id="addBtn">Add book</button>
+  </div>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>Title</th><th>Genre</th><th>Year</th><th>Status</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="empty" hidden>No books found. Add your first book to get started.</div>
+  </div>
+</main>
+
+<dialog id="dlg">
+  <form id="form" method="dialog">
+    <h2 id="dlgTitle">Add book</h2>
+    <label>Title<input name="title" required></label>
+    <label>Author<input name="author" required></label>
+    <div class="row">
+      <label>Year<input name="year" type="number" min="0" max="2100"></label>
+      <label>Genre<input name="genre"></label>
+    </div>
+    <label>Status
+      <select name="status"><option>available</option><option>borrowed</option><option>lost</option></select>
+    </label>
+    <label>Notes<textarea name="notes" rows="2"></textarea></label>
+    <div class="foot">
+      <button type="button" class="btn" id="cancel">Cancel</button>
+      <button type="submit" class="btn primary" id="save">Save book</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast" role="status"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const rows = $("#rows"), dlg = $("#dlg"), form = $("#form");
+let editingId = null, timer;
+// If the page is opened from a file or another dev server (e.g. Live Server), talk to the API on port 3000
+const API_BASE = (location.protocol === "file:" || (location.hostname === "localhost" && location.port && location.port !== "3000")) ? "http://localhost:3000" : "";
+
+function toast(msg, err) {
+  const t = $("#toast"); t.textContent = msg; t.className = "show" + (err ? " err" : "");
+  clearTimeout(timer); timer = setTimeout(() => (t.className = ""), 2600);
+}
+async function api(url, opts = {}) {
+  let res;
+  try { res = await fetch(API_BASE + url, { headers: { "Content-Type": "application/json" }, ...opts }); }
+  catch { throw new Error("Can't reach the server. Run npm start, then open http://localhost:3000"); }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// READ
+async function load() {
+  const p = new URLSearchParams({ q: $("#q").value, status: $("#statusFilter").value });
+  try {
+    const books = await api("/api/books?" + p);
+    rows.innerHTML = books.map((b) => `
+      <tr>
+        <td class="t">${esc(b.title)}<div class="sm-text">${esc(b.author)}</div></td>
+        <td>${esc(b.genre) || "—"}</td>
+        <td>${b.year ?? "—"}</td>
+        <td><span class="badge ${b.status}">${b.status}</span></td>
+        <td class="actions">
+          <button class="btn sm" data-edit="${b._id}">Edit</button>
+          <button class="btn sm danger" data-del="${b._id}" data-title="${esc(b.title)}">Delete</button>
+        </td>
+      </tr>`).join("");
+    $("#empty").hidden = books.length > 0;
+  } catch (e) { toast(e.message, true); }
+}
+
+function openForm(book) {
+  editingId = book?._id || null;
+  form.reset();
+  $("#dlgTitle").textContent = book ? "Edit book" : "Add book";
+  if (book) for (const k of ["title", "author", "year", "genre", "status", "notes"]) form.elements[k].value = book[k] ?? "";
+  dlg.showModal();
+}
+
+// CREATE + UPDATE
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(form));
+  if (body.year === "") delete body.year;
+  try {
+    await api(editingId ? `/api/books/${editingId}` : "/api/books", { method: editingId ? "PUT" : "POST", body: JSON.stringify(body) });
+    dlg.close(); toast(editingId ? "Book updated" : "Book added"); load();
+  } catch (err) { toast(err.message, true); }
+});
+
+rows.addEventListener("click", async (e) => {
+  const edit = e.target.closest("[data-edit]"), del = e.target.closest("[data-del]");
+  try {
+    if (edit) openForm(await api("/api/books/" + edit.dataset.edit));
+    if (del && confirm(`Delete "${del.dataset.title}"? This can't be undone.`)) {
+      await api("/api/books/" + del.dataset.del, { method: "DELETE" }); // DELETE
+      toast("Book deleted"); load();
+    }
+  } catch (err) { toast(err.message, true); }
+});
+
+$("#addBtn").onclick = () => openForm();
+$("#cancel").onclick = () => dlg.close();
+let deb; $("#q").oninput = () => { clearTimeout(deb); deb = setTimeout(load, 250); };
+$("#statusFilter").onchange = load;
+load();
+</script>
+</body>
+</html>
